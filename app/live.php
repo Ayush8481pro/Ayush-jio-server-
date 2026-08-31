@@ -55,6 +55,12 @@ if ($is_case_1) {
     $response["cookie_hex"] = $cook;
     $response["raw_playlist"] = $playlist; // Returns original, unmodified M3U8 text
 
+    // Extract stream IDs from the playlist
+    $streamInfo = extractStreamInfo($playlist);
+    $response["stream_uris"] = $streamInfo["uris"];
+    $response["stream_ids"] = $streamInfo["basenames"];
+    $response["stream_id"] = $streamInfo["basenames"][0] ?? null;
+
 } elseif ($is_case_2) {
     // Case 2: HLS streams
     $playlist = cUrlGetData($haystack->result, $headers_1);
@@ -72,6 +78,12 @@ if ($is_case_1) {
     $response["cookie_hex"] = bin2hex($cook_final);
     $response["raw_playlist"] = $playlist; // Returns original, unmodified M3U8 text
 
+    // Extract stream IDs from the playlist
+    $streamInfo = extractStreamInfo($playlist);
+    $response["stream_uris"] = $streamInfo["uris"];
+    $response["stream_ids"] = $streamInfo["basenames"];
+    $response["stream_id"] = $streamInfo["basenames"][0] ?? null;
+
 } else {
     // Case 3: fallback stream
     $fallback_url = "https://snehtv.pages.dev/video/tsjiotv.m3u8";
@@ -80,6 +92,34 @@ if ($is_case_1) {
     $response["stream_type"] = "fallback";
     $response["original_url"] = $fallback_url;
     $response["raw_playlist"] = $playlist;
+
+    // Extract stream IDs from the fallback playlist
+    $streamInfo = extractStreamInfo($playlist);
+    $response["stream_uris"] = $streamInfo["uris"];
+    $response["stream_ids"] = $streamInfo["basenames"];
+    $response["stream_id"] = $streamInfo["basenames"][0] ?? null;
+}
+
+/**
+ * Extracts URI attribute values from an M3U8 playlist and returns both the full URI
+ * and the basename (the part after the last '/').
+ *
+ * @param string $playlist M3U8 content
+ * @return array Associative array with keys 'uris' (full URI strings) and 'basenames'
+ */
+function extractStreamInfo($playlist) {
+    $uris = [];
+    $basenames = [];
+    if (preg_match_all('/URI="([^"]+)"/', $playlist, $matches)) {
+        $uris = $matches[1];
+        foreach ($uris as $uri) {
+            $basenames[] = basename($uri);
+        }
+    }
+    return [
+        'uris' => $uris,
+        'basenames' => $basenames
+    ];
 }
 
 // Echo structured JSON response
