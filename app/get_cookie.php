@@ -1,8 +1,11 @@
 <?php
-error_reporting(0);
+error_reporting(E_ALL);
+ini_set('display_errors', 1);
 
 header("Content-Type: text/plain");
 header("Access-Control-Allow-Origin: *");
+
+$DEBUG = isset($_REQUEST['debug']) && $_REQUEST['debug'] == '1';
 
 // ---------------------------------------------------------------------
 // 1. Read and sanitize inputs
@@ -11,7 +14,7 @@ $id      = trim($_REQUEST['id']      ?? '');
 $ck      = trim($_REQUEST['ck']      ?? '');
 $jiocred = trim($_REQUEST['jiocred'] ?? '');
 $credkey = trim($_REQUEST['credkey'] ?? '');
-$chid    = trim($_REQUEST['chid']    ?? '');   // <-- NEW: actual channel ID
+$chid    = trim($_REQUEST['chid']    ?? '');   // optional channel ID for credential fallback
 
 if (empty($id)) {
     http_response_code(400);
@@ -47,7 +50,7 @@ if (empty($initialCookie)) {
         exit("Missing 'chid' parameter: actual channel ID is required when using jiocred/credkey.");
     }
     try {
-        $initialCookie = generate_initial_cookie_from_credentials($jiocred, $credkey, $chid);
+        $initialCookie = generate_initial_cookie_from_credentials($jiocred, $credkey, $chid, $DEBUG);
     } catch (Exception $e) {
         http_response_code(500);
         exit("Failed to generate cookie from credentials: " . $e->getMessage());
@@ -73,23 +76,89 @@ $url = sprintf("https://jiotvmblive.cdn.jio.com/bpk-tv/%s/Fallback/%s", $chs[0],
 // ---------------------------------------------------------------------
 // 4. Step 1: Initial request (may set/refresh CDN cookies)
 // ---------------------------------------------------------------------
-cUrlGetData($url, $headers);
+if ($DEBUG) {
+    echo "=== Step 1: Initial Request ===\n";
+    echo "URL: $url\n";
+    echo "Headers: " . json_encode($headers) . "\n\n";
+}
+$response1 = cUrlGetDataWithDetails($url, $headers, null, $DEBUG);
+if ($DEBUG) {
+    echo "Step 1 Response:\n";
+    echo "Status: " . $response1['http_code'] . "\n";
+    echo "Headers:\n" . $response1['headers'] . "\n";
+    echo "Body:\n" . $response1['body'] . "\n\n";
+}
 
 // ---------------------------------------------------------------------
 // 5. Step 2: Fetch fresh __hdnea__ cookie
 // ---------------------------------------------------------------------
+if ($DEBUG) {
+    echo "=== Step 2: Fetch Fresh Cookie ===\n";
+}
 try {
-    $freshCookieHex = get_and_refresh_cookie($url, $headers);
-    echo $freshCookieHex;
+    $freshCookieHex = get_and_refresh_cookie($url, $headers, $DEBUG);
+    if ($DEBUG) {
+        echo "Fresh cookie hex: $freshCookieHex\n";
+    } else {
+        echo $freshCookieHex;
+    }
 } catch (Exception $e) {
     http_response_code(500);
-    echo "Error: " . $e->getMessage();
+    if ($DEBUG) {
+        echo "Error: " . $e->getMessage() . "\n";
+    } else {
+        echo "Error: " . $e->getMessage();
+    }
 }
 
 // =====================================================================
-// Helper functions (same as before, but with generate_initial_cookie_from_credentials)
+// Helper functions (with optional debug)
 // =====================================================================
 
+/**
+ * Perform a cURL request and return an array containing body, status code, and headers.
+ */
+function cUrlGetDataWithDetails($url, $headers = null, $post_fields = null, $debug = false)
+{
+    $ch = curl_init();
+    curl_setopt($ch, CURLOPT_URL, $url);
+    curl_setopt($ch, CURLOPT_RETURNTRANSFER, 1);
+    curl_setopt($ch, CURLOPT_HEADER, 1); // include headers in output
+    curl_setopt($ch, CURLOPT_CONNECTTIMEOUT, 10);
+    curl_setopt($ch, CURLOPT_TIMEOUT, 15);
+
+    if (!empty($post_fields)) {
+        curl_setopt($ch, CURLOPT_POST, 1);
+        curl_setopt($ch, CURLOPT_POSTFIELDS, $post_fields);
+    }
+
+    if (!empty($headers)) {
+        curl_setopt($ch, CURLOPT_HTTPHEADER, $headers);
+    }
+
+    $response = curl_exec($ch);
+    if (curl_errno($ch)) {
+        $err = curl_error($ch);
+        curl_close($ch);
+        throw new Exception("cURL Error: $err");
+    }
+
+    $http_code = curl_getinfo($ch, CURLINFO_HTTP_CODE);
+    $header_size = curl_getinfo($ch, CURLINFO_HEADER_SIZE);
+    $response_headers = substr($response, 0, $header_size);
+    $response_body = substr($response, $header_size);
+    curl_close($ch);
+
+    return [
+        'http_code' => $http_code,
+        'headers'   => $response_headers,
+        'body'      => $response_body,
+    ];
+}
+
+/**
+ * Simple cURL GET (legacy) – kept for compatibility, but not used in debug mode.
+ */
 function cUrlGetData($url, $headers = null, $post_fields = null)
 {
     $ch = curl_init();
@@ -117,6 +186,9 @@ function cUrlGetData($url, $headers = null, $post_fields = null)
     return $data;
 }
 
+/**
+ * Extract cookies from raw HTTP response headers.
+ */
 function extractCookies($header)
 {
     $cookies = [];
@@ -129,48 +201,38 @@ function extractCookies($header)
     return $cookies;
 }
 
-function getCookiesFromUrl($url, $headers = [], $post_fields = null)
+/**
+ * Get cookies from a URL (using cUrlGetDataWithDetails to capture status/headers).
+ */
+function getCookiesFromUrl($url, $headers = [], $post_fields = null, $debug = false)
 {
-    $ch = curl_init($url);
-    curl_setopt_array($ch, [
-        CURLOPT_RETURNTRANSFER => true,
-        CURLOPT_HEADER         => true,
-        CURLOPT_HTTPHEADER     => $headers,
-        CURLOPT_CONNECTTIMEOUT => 10,
-        CURLOPT_TIMEOUT        => 15,
-    ]);
-
-    if ($post_fields !== null) {
-        curl_setopt($ch, CURLOPT_POST, true);
-        curl_setopt($ch, CURLOPT_POSTFIELDS, $post_fields);
-    }
-
-    $response = curl_exec($ch);
-    if (curl_errno($ch)) {
-        $err = curl_error($ch);
-        curl_close($ch);
-        throw new Exception("cURL Error: $err");
-    }
-
-    $header_size = curl_getinfo($ch, CURLINFO_HEADER_SIZE);
-    $header = substr($response, 0, $header_size);
-    curl_close($ch);
-
-    return extractCookies($header);
+    $response = cUrlGetDataWithDetails($url, $headers, $post_fields, $debug);
+    return extractCookies($response['headers']);
 }
 
-function get_and_refresh_cookie($url, $headers)
+/**
+ * Get a fresh __hdnea__ cookie from the CDN and return it hex‑encoded.
+ */
+function get_and_refresh_cookie($url, $headers, $debug = false)
 {
-    $cookies = getCookiesFromUrl($url, $headers);
+    if ($debug) {
+        echo "Making second request to: $url\n";
+    }
+    $cookies = getCookiesFromUrl($url, $headers, null, $debug);
+    if ($debug) {
+        echo "Cookies found: " . json_encode($cookies) . "\n";
+    }
     if (isset($cookies['__hdnea__'])) {
         return bin2hex('__hdnea__=' . $cookies['__hdnea__']);
     }
     throw new Exception("Cookie '__hdnea__' not found in response.");
 }
 
-function generate_initial_cookie_from_credentials($jiocred, $credkey, $channelId)
+/**
+ * Generate initial cookie from Jio credentials (with debug).
+ */
+function generate_initial_cookie_from_credentials($jiocred, $credkey, $channelId, $debug = false)
 {
-    // Decode the base64url-encoded jiocred JSON
     $decoded = base64_decode(strtr($jiocred, '-_', '+/'));
     if ($decoded === false) {
         throw new Exception("Invalid jiocred: not valid base64.");
@@ -222,7 +284,19 @@ function generate_initial_cookie_from_credentials($jiocred, $credkey, $channelId
     ];
 
     $apiUrl = "https://jiotvapi.media.jio.com/playback/apis/v1/geturl?langId=6";
-    $apiCookies = getCookiesFromUrl($apiUrl, $api_headers, $post_data);
+
+    if ($debug) {
+        echo "=== Jio API Request (Credential Fallback) ===\n";
+        echo "URL: $apiUrl\n";
+        echo "POST Data: $post_data\n";
+        echo "Headers: " . json_encode($api_headers) . "\n\n";
+    }
+
+    $apiCookies = getCookiesFromUrl($apiUrl, $api_headers, $post_data, $debug);
+
+    if ($debug) {
+        echo "Jio API Cookies: " . json_encode($apiCookies) . "\n";
+    }
 
     if (isset($apiCookies['__hdnea__'])) {
         return '__hdnea__=' . $apiCookies['__hdnea__'];
