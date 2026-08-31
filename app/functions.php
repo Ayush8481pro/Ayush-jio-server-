@@ -59,24 +59,17 @@ function refresh_token()
 // Refresh cookie if necessary
 function get_and_refresh_cookie($url, $headers)
 {
-  $filePath = DATA_FOLDER . '/cookie.jtv';
-  $cookieNeedsRefresh = !file_exists($filePath) || (time() - filemtime($filePath) > COOKIE_EXPIRY_TIME);
-
-  if ($cookieNeedsRefresh) {
+    // Always fetch a fresh cookie from the CDN
     $cookies = getCookiesFromUrl($url, $headers);
+
     if (isset($cookies['__hdnea__'])) {
-      $cooKee = bin2hex('__hdnea__=' . $cookies['__hdnea__']);
-      file_put_contents($filePath, $cooKee);
+        // Hex-encode the complete cookie string "__hdnea__=value"
+        $cooKee = bin2hex('__hdnea__=' . $cookies['__hdnea__']);
+        return $cooKee;
     } else {
-      throw new Exception("Cookie '__hdnea__' not found in response.");
+        throw new Exception("Cookie '__hdnea__' not found in response.");
     }
-  } else {
-    $cooKee = file_get_contents($filePath);
-  }
-
-  return $cooKee;
 }
-
 
 // Generate Jio headers
 function jio_headers($cookies, $access_token, $crm, $device_id, $ssoToken, $uniqueId)
