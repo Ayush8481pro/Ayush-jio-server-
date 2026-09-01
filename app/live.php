@@ -53,17 +53,13 @@ if ($is_case_1) {
     $response["stream_type"] = "bpk-tv";
     $response["cookie"] = $cookies_y;
     $response["cookie_hex"] = $cook;
-    $response["raw_playlist"] = $playlist;
-
-    $streamInfo = extractStreamInfo($playlist);
-    $response["stream_uris"] = $streamInfo["uris"];
-    $response["stream_ids"] = $streamInfo["basenames"];
-    $response["stream_id"] = $streamInfo["basenames"][0] ?? null;
+    $response["raw_playlist"] = $playlist; // Returns original, unmodified M3U8 text
 
 } elseif ($is_case_2) {
     // Case 2: HLS streams
     $playlist = cUrlGetData($haystack->result, $headers_1);
 
+    // Extract HLS Cookie safely
     $cook_decoded = hex2bin($cook);
     if (str_contains($cook_decoded, "__hdnea")) {
         $cook_final = "__hdnea" . explode("__hdnea", $cook_decoded)[1];
@@ -74,12 +70,7 @@ if ($is_case_1) {
     $response["stream_type"] = "HLS";
     $response["cookie"] = $cook_final;
     $response["cookie_hex"] = bin2hex($cook_final);
-    $response["raw_playlist"] = $playlist;
-
-    $streamInfo = extractStreamInfo($playlist);
-    $response["stream_uris"] = $streamInfo["uris"];
-    $response["stream_ids"] = $streamInfo["basenames"];
-    $response["stream_id"] = $streamInfo["basenames"][0] ?? null;
+    $response["raw_playlist"] = $playlist; // Returns original, unmodified M3U8 text
 
 } else {
     // Case 3: fallback stream
@@ -89,34 +80,6 @@ if ($is_case_1) {
     $response["stream_type"] = "fallback";
     $response["original_url"] = $fallback_url;
     $response["raw_playlist"] = $playlist;
-
-    $streamInfo = extractStreamInfo($playlist);
-    $response["stream_uris"] = $streamInfo["uris"];
-    $response["stream_ids"] = $streamInfo["basenames"];
-    $response["stream_id"] = $streamInfo["basenames"][0] ?? null;
-}
-
-/**
- * Extracts URI attribute values from an M3U8 playlist.
- * Handles case‑insensitive URI=, both double and single quotes.
- *
- * @param string $playlist
- * @return array ['uris' => full URIs, 'basenames' => file names]
- */
-function extractStreamInfo($playlist) {
-    $uris = [];
-    $basenames = [];
-    // Match URI="..." or URI='...' (case-insensitive)
-    if (preg_match_all('/\bURI\s*=\s*["\']([^"\']+)["\']/i', $playlist, $matches)) {
-        $uris = $matches[1];
-        foreach ($uris as $uri) {
-            $basenames[] = basename($uri);
-        }
-    }
-    return [
-        'uris' => $uris,
-        'basenames' => $basenames
-    ];
 }
 
 // Echo structured JSON response
