@@ -50,7 +50,7 @@ if ($is_case_1) {
     // Case 1: bpk-tv streams
     $playlist = cUrlGetData($haystack->result, $headers_1);
     
-    $response["stream_type"] = "dash";
+    $response["stream_type"] = "bpk-tv";
     $response["cookie"] = $cookies_y;
     $response["cookie_hex"] = $cook;
     $response["raw_playlist"] = $playlist; // Returns original, unmodified M3U8 text
